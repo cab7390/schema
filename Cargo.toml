@@ -1,0 +1,16 @@
+[package]
+name = "schema"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.95"
+bitflags = "2.7.0"
+flume = "0.11.1"
+memmap2 = "0.9.5"
+rayon = "1.10.0"
+serde = { version = "1.0.217", features = ["derive"] }
+serde_json = "1.0.135"
+simd-json = "0.14.3"
+stacker = "0.1.17"
+thread_local = "1.1.8"
