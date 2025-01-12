@@ -5,13 +5,22 @@ use std::{
 
 use simd_json::{BorrowedValue, StaticNode};
 
-const MAX_OBJECT_KEYS: usize = 200;
-const MAX_STRING_SET_VALUES: usize = 100;
-const MAX_STRING_SET_VARIANT_LENGTH: usize = 50;
-const CONSDIER_STRING_SET: bool = true;
+// const MAX_OBJECT_KEYS: usize = 200;
+// const MAX_STRING_SET_VALUES: usize = 100;
+// const MAX_STRING_SET_VARIANT_LENGTH: usize = 50;
+// const CONSDIER_STRING_SET: bool = false;
 
-const CONSIDER_ARRAY_ITEMS: bool = true;
-const MAX_ARRAY_ITEMS: usize = 5;
+// const CONSIDER_ARRAY_ITEMS: bool = false;
+// const MAX_ARRAY_ITEMS: usize = 10;
+
+pub struct Config {
+    pub max_object_keys: usize,
+    pub max_string_set_values: usize,
+    pub max_string_set_variant_length: usize,
+    pub consider_string_set: bool,
+    pub consider_array_items: bool,
+    pub max_array_items: usize,
+}
 
 bitflags::bitflags! {
     /// Each bit indicates presence of a certain "base" type.
@@ -66,7 +75,7 @@ pub struct Schema {
 }
 
 #[inline]
-pub fn infer_type(value: &BorrowedValue) -> Schema {
+pub fn infer_type(value: &BorrowedValue, config: &Config) -> Schema {
     match value {
         BorrowedValue::Static(static_node) => match static_node {
             StaticNode::I64(_) => Schema::new(TypeMask::I64),
@@ -77,12 +86,12 @@ pub fn infer_type(value: &BorrowedValue) -> Schema {
         },
         BorrowedValue::String(value) => {
             // if we're not considering string sets, just return a string
-            if !CONSDIER_STRING_SET {
+            if !config.consider_string_set {
                 return Schema::new(TypeMask::STRING);
             }
 
             // if the string is too long don't bother with a set
-            if value.len() > MAX_STRING_SET_VARIANT_LENGTH {
+            if value.len() > config.max_string_set_variant_length {
                 return Schema::new(TypeMask::STRING);
             }
 
@@ -97,7 +106,7 @@ pub fn infer_type(value: &BorrowedValue) -> Schema {
             }
         }
         BorrowedValue::Array(arr) => {
-            if !CONSIDER_ARRAY_ITEMS {
+            if !config.consider_array_items {
                 return Schema::new(TypeMask::ARRAY);
             }
 
@@ -109,10 +118,10 @@ pub fn infer_type(value: &BorrowedValue) -> Schema {
             //     return schema;
             // }
 
-            for element in arr.iter().take(MAX_ARRAY_ITEMS) {
-                let element_schema = infer_type(element);
+            for element in arr.iter().take(config.max_array_items) {
+                let element_schema = infer_type(element, config);
                 match &mut item_schema {
-                    Some(existing) => existing.merge(element_schema),
+                    Some(existing) => existing.merge(element_schema, config),
                     None => item_schema = Some(element_schema),
                 }
             }
@@ -125,7 +134,7 @@ pub fn infer_type(value: &BorrowedValue) -> Schema {
             object_properties: Some(
                 inner
                     .iter()
-                    .map(|(key, value)| (key.to_string(), infer_type(value)))
+                    .map(|(key, value)| (key.to_string(), infer_type(value, config)))
                     .collect(),
             ),
             string_values: None,
@@ -144,9 +153,9 @@ impl Schema {
         }
     }
 
-    pub fn merge(&mut self, other: Schema) {
+    pub fn merge(&mut self, other: Schema, config: &Config) {
         // Special case for string sets (if enabled)
-        if CONSDIER_STRING_SET {
+        if config.consider_string_set {
             if self.type_mask.contains(TypeMask::STRING_SET)
                 && other.type_mask.contains(TypeMask::STRING)
                 || self.type_mask.contains(TypeMask::STRING)
@@ -161,7 +170,7 @@ impl Schema {
                 let mut string_values_set = std::mem::take(&mut self.string_values);
                 if let Some(self_values) = &mut string_values_set {
                     if let Some(other_values) = other.string_values {
-                        if self_values.len() + other_values.len() > MAX_STRING_SET_VALUES {
+                        if self_values.len() + other_values.len() > config.max_string_set_values {
                             self.type_mask &= !TypeMask::STRING_SET;
                             self.type_mask |= TypeMask::STRING;
                             self.string_values = None;
@@ -182,14 +191,14 @@ impl Schema {
         }
 
         // Special case for arrays
-        if CONSIDER_ARRAY_ITEMS
+        if config.consider_array_items
             && self.type_mask.contains(TypeMask::ARRAY)
             && other.type_mask.contains(TypeMask::ARRAY)
         {
             match (&mut self.array_items, other.array_items) {
                 (Some(self_items), Some(other_items)) => {
                     // Merge the two item schemas
-                    self_items.merge(*other_items);
+                    self_items.merge(*other_items, config);
                 }
                 (None, Some(other_items)) => {
                     // If one side never inferred any item schema,
@@ -206,7 +215,7 @@ impl Schema {
 
         if self.type_mask.contains(TypeMask::OBJECT) {
             if let Some(self_props) = &self.object_properties {
-                if self_props.len() > MAX_OBJECT_KEYS {
+                if self_props.len() > config.max_object_keys {
                     self.type_mask &= !TypeMask::OBJECT; // remove object
                     self.type_mask |= TypeMask::LARGE_OBJ; // add large object
                     self.object_properties = None; // remove properties
@@ -225,7 +234,7 @@ impl Schema {
                 for (key, mut other_prop) in other_props {
                     match leftover_self_props.remove(&key) {
                         Some(mut self_prop) => {
-                            self_prop.merge(other_prop);
+                            self_prop.merge(other_prop, config);
                             self_props.insert(key, self_prop);
                         }
                         None => {

@@ -1,29 +1,44 @@
+use indicatif::ProgressBar;
 use memmap2::Mmap;
 use rayon::prelude::*;
 use simd_json::{to_borrowed_value, BorrowedValue};
 use std::fs::File;
 use std::io::Result;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// A type for processing JSON files in parallel using simd-json and user-provided logic.
 pub struct ParallelJsonProcessor {
     mmap: Mmap,
     file_size: usize,
     chunk_size: usize,
+
+    progress: ProgressBar,
 }
 
 impl ParallelJsonProcessor {
     /// Create a new `ParallelJsonProcessor` from a file.
-    pub fn new(filename: &str, chunk_size: usize) -> Result<Self> {
-        let path = PathBuf::from(filename);
-        let file = File::open(&path)?;
+    pub fn new<P: AsRef<Path>>(path: P, chunk_size: usize) -> Result<Self> {
+        // let path = PathBuf::from(filename);
+        let file = File::open(path)?;
         let file_size = file.metadata()?.len() as usize;
+
+        eprintln!("Mapping file of size: {}", file_size);
+
         let mmap = unsafe { memmap2::MmapOptions::new().map(&file)? };
-        
+
+        let progress = ProgressBar::new(file_size as u64);
+        progress.set_style(
+            indicatif::ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+                .unwrap()
+                .progress_chars("#>-"),
+        );
+
         Ok(Self {
             mmap,
             file_size,
             chunk_size,
+            progress,
         })
     }
 
@@ -99,23 +114,32 @@ impl ParallelJsonProcessor {
         results
     }
 
-    pub fn process_with_thread_state<F, R, S>(&self, processor: F, reducer: R, state_initializer: impl Fn() -> S) -> S
+    pub fn process_with_thread_state<F, R, S>(
+        &self,
+        processor: F,
+        reducer: R,
+        state_initializer: impl Fn() -> S,
+    ) -> S
     where
         F: Fn(&BorrowedValue, &mut S) + Sync + Send,
         R: Fn(S, S) -> S + Sync + Send,
         S: Default + Clone + Send,
     {
         let chunk_boundaries = self.find_chunk_boundaries();
-    
-        chunk_boundaries
+
+        let result = chunk_boundaries
             .into_par_iter()
             .fold_with(state_initializer(), |mut local_state, (start, end)| {
                 self.process_chunk_with_state(&self.mmap[start..end], &processor, &mut local_state);
                 local_state
             })
-            .reduce(Default::default, reducer)
+            .reduce(Default::default, reducer);
+
+        self.progress.finish();
+
+        result
     }
-    
+
     fn process_chunk_with_state<F, S>(&self, chunk: &[u8], processor: &F, state: &mut S)
     where
         F: Fn(&BorrowedValue, &mut S),
@@ -124,7 +148,10 @@ impl ParallelJsonProcessor {
             if line.is_empty() {
                 continue;
             }
-    
+
+            // Update progress bar
+            self.progress.inc(line.len() as u64);
+
             let mut owned_line = line.to_vec();
             let borrowed_value = to_borrowed_value(&mut owned_line);
             if let Ok(parsed) = borrowed_value {
