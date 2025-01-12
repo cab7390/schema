@@ -1,9 +1,6 @@
-use std::hint::black_box;
-
 use anyhow::Result;
 use process::ParallelJsonProcessor;
 use schema::Schema;
-use simd_json::{base::ValueAsScalar, derived::ValueObjectAccess};
 
 const CHUNK_SIZE: usize = 16 * 1024 * 1024; // 16 MB
 
@@ -15,25 +12,8 @@ fn main() -> Result<()> {
     let start = std::time::Instant::now();
     let processer = ParallelJsonProcessor::new("posts.json", CHUNK_SIZE)?;
 
-    // let sum = processer.process(|json| {
-    //     json["score"].as_i64().unwrap()
-    //     // json["name"].as_str().map(|str| str.len() as i64).unwrap_or(0)
-    //     // json["tags"].as_array().map(|arr| arr.len() as i64).unwrap_or(0)
-    // }, |a, b| {
-    //     a + b
-    // });
-
     let (processed, schema) = processer.process_with_thread_state(
         |json, (total, state): &mut (usize, Option<Schema>)| {
-            // let value_type = schema::infer_type(json);
-            // println!("{:?}", value_type);
-            // *state = Some(value_type);
-            // *state += json["score"].as_i64().unwrap();
-            // if json.get("tags").is_none() {
-            //     println!("{:?}", json);
-            //     std::process::exit(0);
-            // }
-
             *total += 1;
             match state {
                 Some(schema) => {

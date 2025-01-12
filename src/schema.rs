@@ -5,52 +5,12 @@ use std::{
 
 use simd_json::{BorrowedValue, StaticNode};
 
-// #[derive(Debug, Clone)]
-// pub enum SchemaType {
-//     String,
-//     Number(NumberType),
-//     Boolean,
-//     Null,
-//     Array,
-//     Object(BTreeMap<String, SchemaType>),
-
-//     // Meta types
-//     Either(BTreeSet<SchemaType>),
-//     Optional(Box<SchemaType>),
-// }
-
-// #[derive(Debug, Clone, Copy, Hash)]
-// pub enum NumberType {
-//     I64,
-//     U64,
-//     F64,
-// }
-
-// #[inline]
-// pub fn infer_type(value: &BorrowedValue) -> SchemaType {
-//     match value {
-//         BorrowedValue::Static(static_node) => match static_node {
-//             StaticNode::I64(_) => SchemaType::Number(NumberType::I64),
-//             StaticNode::U64(_) => SchemaType::Number(NumberType::U64),
-//             StaticNode::F64(_) => SchemaType::Number(NumberType::F64),
-//             StaticNode::Bool(_) => SchemaType::Boolean,
-//             StaticNode::Null => SchemaType::Null,
-//         },
-//         BorrowedValue::String(_) => SchemaType::String,
-//         BorrowedValue::Array(_) => SchemaType::Array,
-//         BorrowedValue::Object(inner) => SchemaType::Object(
-//             inner
-//                 .iter()
-//                 .map(|(key, value)| (key.to_string(), infer_type(value)))
-//                 .collect(),
-//         ),
-//     }
-// }
-
 const MAX_OBJECT_KEYS: usize = 200;
 const MAX_STRING_SET_VALUES: usize = 100;
 const MAX_STRING_SET_VARIANT_LENGTH: usize = 20;
 const CONSDIER_STRING_SET: bool = true;
+
+const CONSIDER_ARRAY_ITEMS: bool = true;
 
 bitflags::bitflags! {
     /// Each bit indicates presence of a certain "base" type.
@@ -100,7 +60,7 @@ pub struct Schema {
     pub string_values: Option<HashSet<String>>,
     // / If `type_mask` includes "array" and you need deeper array validation
     // / (like "array of X"), you could store that schema here.
-    // pub array_items: Option<Box<Schema>>,
+    pub array_items: Option<Box<Schema>>,
 }
 
 #[inline]
@@ -131,6 +91,7 @@ pub fn infer_type(value: &BorrowedValue) -> Schema {
                 type_mask: TypeMask::STRING_SET,
                 object_properties: None,
                 string_values: Some(set),
+                array_items: None,
             }
         }
         BorrowedValue::Array(_) => Schema::new(TypeMask::ARRAY),
@@ -143,6 +104,7 @@ pub fn infer_type(value: &BorrowedValue) -> Schema {
                     .collect(),
             ),
             string_values: None,
+            array_items: None,
         },
     }
 }
@@ -153,6 +115,7 @@ impl Schema {
             type_mask: mask,
             object_properties: None,
             string_values: None,
+            array_items: None,
         }
     }
 
@@ -193,41 +156,6 @@ impl Schema {
         } else {
             self.type_mask |= other.type_mask;
         }
-
-        // if self.type_mask.contains(TypeMask::STRING_SET)
-        //     && other.type_mask.contains(TypeMask::STRING)
-        // {
-        //     self.type_mask &= !TypeMask::STRING_SET;
-        //     self.type_mask |= TypeMask::STRING;
-        //     self.string_values = None;
-        // } else if self.type_mask.contains(TypeMask::STRING)
-        //     && other.type_mask.contains(TypeMask::STRING_SET)
-        // {
-        //     self.type_mask &= !TypeMask::STRING_SET;
-        //     self.type_mask |= TypeMask::STRING;
-        //     self.string_values = None;
-        // } else if self.type_mask.contains(TypeMask::STRING_SET)
-        //     && other.type_mask.contains(TypeMask::STRING_SET)
-        // {
-        //     let mut string_values_set = std::mem::take(&mut self.string_values);
-        //     if let Some(self_values) = &mut string_values_set {
-        //         if let Some(other_values) = other.string_values {
-        //             if self_values.len() + other_values.len() > MAX_STRING_SET_VALUES {
-        //                 self.type_mask &= !TypeMask::STRING_SET;
-        //                 self.type_mask |= TypeMask::STRING;
-        //                 self.string_values = None;
-        //                 // return;
-        //             } else {
-        //                 self_values.extend(other_values);
-        //             }
-        //         }
-        //     } else {
-        //         self.string_values = other.string_values;
-        //     }
-        //     self.string_values = string_values_set;
-        // } else {
-        //     self.type_mask |= other.type_mask;
-        // }
 
         if self.type_mask.contains(TypeMask::OBJECT) {
             if let Some(self_props) = &self.object_properties {
@@ -282,16 +210,3 @@ impl Schema {
         }
     }
 }
-
-/*
-                // for (key, mut other_prop) in other_props {
-                //     match self_props.get_mut(&key) {
-                //         Some(self_prop) => self_prop.merge(other_prop),
-                //         None => {
-                //             other_prop.type_mask |= TypeMask::ABSENT;
-                //             self_props.insert(key, other_prop);
-                //         }
-                //     }
-                // }
-
-*/
