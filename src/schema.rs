@@ -3,6 +3,7 @@ use std::{
     hash::Hash,
 };
 
+use serde::{Deserialize, Serialize};
 use simd_json::{BorrowedValue, StaticNode};
 
 // const MAX_OBJECT_KEYS: usize = 200;
@@ -20,13 +21,15 @@ pub struct Config {
     pub consider_string_set: bool,
     pub consider_array_items: bool,
     pub max_array_items: usize,
+    pub chunk_size: usize,
+    pub stats: bool,
 }
 
 bitflags::bitflags! {
     /// Each bit indicates presence of a certain "base" type.
     /// E.g. STRING | NULL means "Either(String, Null)".
 
-    #[derive(Clone, Debug, Copy)]
+    #[derive(Clone, Debug, Copy, Serialize, Deserialize)]
     pub struct TypeMask: u32 {
         const STRING     = 0b0000_0000_0001;
         const BOOLEAN    = 0b0000_0000_0010;
@@ -56,7 +59,7 @@ bitflags::bitflags! {
 /// plus an optional object structure. The "Either" concept is stored
 /// in `type_mask` as multiple bits set. "Optional" is just `NULL` bit set
 /// alongside something else.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Schema {
     /// Which base types are allowed: String, Number(I64), Number(U64), etc.
     pub type_mask: TypeMask,

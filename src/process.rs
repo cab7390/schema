@@ -4,7 +4,7 @@ use rayon::prelude::*;
 use simd_json::{to_borrowed_value, BorrowedValue};
 use std::fs::File;
 use std::io::Result;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// A type for processing JSON files in parallel using simd-json and user-provided logic.
 pub struct ParallelJsonProcessor {
