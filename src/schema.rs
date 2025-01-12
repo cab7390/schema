@@ -7,16 +7,17 @@ use simd_json::{BorrowedValue, StaticNode};
 
 const MAX_OBJECT_KEYS: usize = 200;
 const MAX_STRING_SET_VALUES: usize = 100;
-const MAX_STRING_SET_VARIANT_LENGTH: usize = 20;
+const MAX_STRING_SET_VARIANT_LENGTH: usize = 50;
 const CONSDIER_STRING_SET: bool = true;
 
 const CONSIDER_ARRAY_ITEMS: bool = true;
+const MAX_ARRAY_ITEMS: usize = 5;
 
 bitflags::bitflags! {
     /// Each bit indicates presence of a certain "base" type.
     /// E.g. STRING | NULL means "Either(String, Null)".
 
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, Copy)]
     pub struct TypeMask: u32 {
         const STRING     = 0b0000_0000_0001;
         const BOOLEAN    = 0b0000_0000_0010;
@@ -58,6 +59,7 @@ pub struct Schema {
 
     // If `type_mask` includes "string_set", then `string_values` is `Some(...)`.
     pub string_values: Option<HashSet<String>>,
+
     // / If `type_mask` includes "array" and you need deeper array validation
     // / (like "array of X"), you could store that schema here.
     pub array_items: Option<Box<Schema>>,
@@ -94,7 +96,30 @@ pub fn infer_type(value: &BorrowedValue) -> Schema {
                 array_items: None,
             }
         }
-        BorrowedValue::Array(_) => Schema::new(TypeMask::ARRAY),
+        BorrowedValue::Array(arr) => {
+            if !CONSIDER_ARRAY_ITEMS {
+                return Schema::new(TypeMask::ARRAY);
+            }
+
+            let mut schema = Schema::new(TypeMask::ARRAY);
+            let mut item_schema: Option<Schema> = None;
+
+            // if the array is too long, don't bother with items
+            // if arr.len() > MAX_ARRAY_ITEMS {
+            //     return schema;
+            // }
+
+            for element in arr.iter().take(MAX_ARRAY_ITEMS) {
+                let element_schema = infer_type(element);
+                match &mut item_schema {
+                    Some(existing) => existing.merge(element_schema),
+                    None => item_schema = Some(element_schema),
+                }
+            }
+
+            schema.array_items = item_schema.map(Box::new);
+            schema
+        }
         BorrowedValue::Object(inner) => Schema {
             type_mask: TypeMask::OBJECT,
             object_properties: Some(
@@ -120,7 +145,6 @@ impl Schema {
     }
 
     pub fn merge(&mut self, other: Schema) {
-
         // Special case for string sets (if enabled)
         if CONSDIER_STRING_SET {
             if self.type_mask.contains(TypeMask::STRING_SET)
@@ -155,6 +179,29 @@ impl Schema {
             }
         } else {
             self.type_mask |= other.type_mask;
+        }
+
+        // Special case for arrays
+        if CONSIDER_ARRAY_ITEMS
+            && self.type_mask.contains(TypeMask::ARRAY)
+            && other.type_mask.contains(TypeMask::ARRAY)
+        {
+            match (&mut self.array_items, other.array_items) {
+                (Some(self_items), Some(other_items)) => {
+                    // Merge the two item schemas
+                    self_items.merge(*other_items);
+                }
+                (None, Some(other_items)) => {
+                    // If one side never inferred any item schema,
+                    // we can just take the other's item schema.
+                    self.array_items = Some(other_items);
+                }
+                (Some(_), None) => {
+                    // If the other side had an empty array or never inferred items,
+                    // do nothing. We keep our existing item schema.
+                }
+                (None, None) => {}
+            }
         }
 
         if self.type_mask.contains(TypeMask::OBJECT) {
