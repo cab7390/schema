@@ -98,13 +98,17 @@ fn main() -> Result<()> {
             Some(ref mut root_schema) => {
                 eprintln!("Merging schema...");
                 root_schema.merge(schema, &config);
-            },
+            }
             None => root_schema = Some(schema),
         }
     }
 
-    let json_schema =
-        RootJsonSchema::new(root_schema.clone().expect("No schema found. Did you provide any files?"));
+    let json_schema = RootJsonSchema::new(
+        root_schema
+            .clone()
+            .expect("No schema found. Did you provide any files?"),
+    );
+    
     match args.output {
         Some(output) => {
             let mut output = BufWriter::new(std::fs::File::create(output)?);
@@ -119,7 +123,11 @@ fn main() -> Result<()> {
     if let Some(schema) = args.schema {
         eprintln!("Writing schema to file...");
         let mut output = BufWriter::new(std::fs::File::create(schema)?);
-        output.write_all(serde_json::to_string_pretty(&root_schema).unwrap().as_bytes())?;
+        output.write_all(
+            serde_json::to_string_pretty(&root_schema)
+                .unwrap()
+                .as_bytes(),
+        )?;
     }
 
     Ok(())
